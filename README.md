@@ -1,14 +1,6 @@
 # Strudel Brainfuck REPL
 
-A browser demo that puts a Brainfuck layer on top of the Strudel REPL. On the
-`stranger-things` branch, the default Brainfuck program emits a pinned upstream
-source URL for eefano's Stranger Things Strudel cover, fetches that source at
-runtime, plays it through Strudel's runtime, and highlights the loader ranges
-that produced the active synth voice.
-
-The default loader points at:
-
-https://github.com/eefano/strudel-songs-collection/blob/a32abf733a4cab967f30eacb4bcecd596c3e2609/strangerthings.js
+A browser demo that puts a Brainfuck layer on top of the Strudel REPL. 
 
 ![Strudel Brainfuck REPL Stranger Things interface](docs/assets/stranger-things-teaser.png)
 
