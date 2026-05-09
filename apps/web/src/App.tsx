@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { Compartment } from "@codemirror/state";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import {
+  eventRangeAt,
   executeBrainfuck,
+  type BrainfuckOutputEvent,
 } from "@strudel-bf/bf-core";
 import {
   brainfuckEditorTheme,
@@ -13,16 +15,19 @@ import {
 import {
   decodeBrainfuckMusicOutput,
   extractMiniTokenSources,
+  type MiniTokenSource,
   renderProgramToStrudel,
 } from "@strudel-bf/music-compiler";
-import { rangeUnion } from "@strudel-bf/shared";
+import { rangeUnion, type SourceRange } from "@strudel-bf/shared";
 import {
   collectActiveSampleNames,
   getPlaybackCycleNow,
   playStrudelCode,
   primePlaybackAudio,
+  preloadPlaybackAudio,
   setPlaybackSampleMapSource,
   stopPlayback,
+  unlockPlaybackAudioFromGesture,
 } from "@strudel-bf/strudel-runtime";
 
 import defaultBrainfuckSource from "../../../fixtures/landing-page-demo.bf?raw";
@@ -30,13 +35,234 @@ import defaultBrainfuckSource from "../../../fixtures/landing-page-demo.bf?raw";
 type CompilationState = {
   bfOutput: string;
   renderedCode: string;
-  tokenSources: ReturnType<typeof extractMiniTokenSources>;
+  playableCode?: string;
+  tokenSources: MiniTokenSource[];
+  strudelTokenSources: StrudelTokenSource[];
+  loaderOutputRanges: SourceRange[][];
+  upstreamSourceUrl?: string;
+};
+
+type StrudelTokenSource = {
+  id: string;
+  token: string;
+  label: string;
+  pattern: string;
+  range: SourceRange;
 };
 
 const MOCK_DRIVER_QUERY = "mock";
+const STRUDEL_URL_PREFIX = "strudel_url=";
+const STRANGER_THINGS_AUTHOR = "eefano";
+const STRANGER_THINGS_REPO_URL =
+  "https://github.com/eefano/strudel-songs-collection";
+const STRANGER_THINGS_SOURCE_URL =
+  "https://raw.githubusercontent.com/eefano/strudel-songs-collection/a32abf733a4cab967f30eacb4bcecd596c3e2609/strangerthings.js";
+const STRANGER_THINGS_SOURCE_PAGE =
+  "https://github.com/eefano/strudel-songs-collection/blob/a32abf733a4cab967f30eacb4bcecd596c3e2609/strangerthings.js";
 
-function compileSource(source: string): CompilationState {
+async function fetchUpstreamStrudelSource(url: string): Promise<string> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(
+      `Could not fetch upstream Strudel source: ${response.status}`,
+    );
+  }
+  return response.text();
+}
+
+function extractStrudelTokenSources(source: string): StrudelTokenSource[] {
+  const tokenSources: StrudelTokenSource[] = [];
+  const lines = source.split(/(\r?\n)/u);
+  let offset = 0;
+  let currentPattern = "global";
+
+  for (let index = 0; index < lines.length; index += 2) {
+    const line = lines[index] ?? "";
+    const newline = lines[index + 1] ?? "";
+    const labelMatch = line.match(/^(\s*)([A-Za-z]\w*)\s*:/u);
+
+    if (labelMatch?.[2]) {
+      currentPattern = labelMatch[2];
+      const start = offset + (labelMatch[1]?.length ?? 0);
+      tokenSources.push({
+        id: `${currentPattern}:label:${start}`,
+        token: currentPattern,
+        label: currentPattern,
+        pattern: currentPattern,
+        range: { start, end: start + currentPattern.length },
+      });
+    }
+
+    const stringLiteralPattern = /"([^"\\]*(?:\\.[^"\\]*)*)"/gu;
+    for (const stringMatch of line.matchAll(stringLiteralPattern)) {
+      const content = stringMatch[1] ?? "";
+      const contentStart = offset + stringMatch.index + 1;
+      const musicalTokenPattern = /[A-Za-z0-9_:#.]+/gu;
+
+      for (const tokenMatch of content.matchAll(musicalTokenPattern)) {
+        const token = tokenMatch[0];
+        const start = contentStart + tokenMatch.index;
+        tokenSources.push({
+          id: `${currentPattern}:${token}:${start}`,
+          token,
+          label:
+            currentPattern === "global" ? token : `${currentPattern}:${token}`,
+          pattern: currentPattern,
+          range: { start, end: start + token.length },
+        });
+      }
+    }
+
+    offset += line.length + newline.length;
+  }
+
+  return tokenSources;
+}
+
+function isSourceRange(value: unknown): value is SourceRange {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "start" in value &&
+    "end" in value &&
+    typeof value.start === "number" &&
+    typeof value.end === "number"
+  );
+}
+
+function rangesOverlap(left: SourceRange, right: SourceRange): boolean {
+  return left.start < right.end && right.start < left.end;
+}
+
+function collectHapLocationRanges(haps: readonly any[]): SourceRange[] {
+  return rangeUnion(
+    ...haps.map((hap) =>
+      Array.isArray(hap.context?.locations)
+        ? hap.context.locations.filter(isSourceRange)
+        : [],
+    ),
+  );
+}
+
+function selectStrudelTokenIdsFromHaps(
+  tokenSources: readonly StrudelTokenSource[],
+  haps: readonly any[],
+): string[] {
+  const ranges = collectHapLocationRanges(haps);
+  if (ranges.length === 0) {
+    return [];
+  }
+
+  return tokenSources
+    .filter((sourceToken) =>
+      ranges.some((range) => rangesOverlap(sourceToken.range, range)),
+    )
+    .map((sourceToken) => sourceToken.id);
+}
+
+function getLoaderOutputRanges(
+  output: string,
+  outputEvents: readonly BrainfuckOutputEvent[],
+  loaderUrl: string,
+): SourceRange[][] {
+  const loaderLine = `${STRUDEL_URL_PREFIX}${loaderUrl}`;
+  const start = output.indexOf(loaderLine);
+  if (start < 0) {
+    return [];
+  }
+
+  return Array.from({ length: loaderLine.length }, (_, index) =>
+    eventRangeAt(outputEvents, start + index, start + index + 1),
+  );
+}
+
+function selectLoaderRangesForActiveTokens(
+  compilation: CompilationState,
+  activeTokenIds: readonly string[],
+): SourceRange[] {
+  if (
+    compilation.loaderOutputRanges.length === 0 ||
+    compilation.renderedCode.length === 0 ||
+    activeTokenIds.length === 0
+  ) {
+    return [];
+  }
+
+  const selectedRanges = activeTokenIds.flatMap((activeTokenId) => {
+    const strudelToken = compilation.strudelTokenSources.find(
+      (sourceToken) => sourceToken.id === activeTokenId,
+    );
+    if (!strudelToken) {
+      return [];
+    }
+
+    const ratio = strudelToken.range.start / compilation.renderedCode.length;
+    const rangeIndex = Math.min(
+      compilation.loaderOutputRanges.length - 1,
+      Math.max(0, Math.floor(ratio * compilation.loaderOutputRanges.length)),
+    );
+    return compilation.loaderOutputRanges[rangeIndex] ?? [];
+  });
+
+  return rangeUnion(selectedRanges);
+}
+
+function renderHighlightedCode(
+  code: string,
+  ranges: readonly SourceRange[],
+): ReactNode {
+  if (ranges.length === 0) {
+    return code;
+  }
+
+  const normalizedRanges = rangeUnion(ranges);
+  const fragments: ReactNode[] = [];
+  let cursor = 0;
+
+  normalizedRanges.forEach((range, index) => {
+    if (cursor < range.start) {
+      fragments.push(code.slice(cursor, range.start));
+    }
+    fragments.push(
+      <span className="code-active-range" key={`${range.start}-${index}`}>
+        {code.slice(range.start, range.end)}
+      </span>,
+    );
+    cursor = range.end;
+  });
+
+  if (cursor < code.length) {
+    fragments.push(code.slice(cursor));
+  }
+
+  return fragments;
+}
+
+async function compileSource(source: string): Promise<CompilationState> {
   const execution = executeBrainfuck(source);
+  const loaderUrl = execution.output
+    .split(/\r?\n/u)
+    .find((line) => line.startsWith(STRUDEL_URL_PREFIX))
+    ?.slice(STRUDEL_URL_PREFIX.length)
+    .trim();
+
+  if (loaderUrl) {
+    const renderedCode = (await fetchUpstreamStrudelSource(loaderUrl)).trim();
+    return {
+      bfOutput: execution.output,
+      renderedCode,
+      playableCode: renderedCode,
+      upstreamSourceUrl: loaderUrl,
+      tokenSources: [],
+      strudelTokenSources: extractStrudelTokenSources(renderedCode),
+      loaderOutputRanges: getLoaderOutputRanges(
+        execution.output,
+        execution.outputEvents,
+        loaderUrl,
+      ),
+    };
+  }
+
   const program = decodeBrainfuckMusicOutput(
     execution.output,
     execution.outputEvents,
@@ -51,6 +277,8 @@ function compileSource(source: string): CompilationState {
     bfOutput: execution.output,
     renderedCode: rendered.code,
     tokenSources: extractMiniTokenSources(voice.mini),
+    strudelTokenSources: [],
+    loaderOutputRanges: [],
   };
 }
 
@@ -74,9 +302,16 @@ export function App() {
   const [source, setSource] = useState(defaultBrainfuckSource);
   const [compilation, setCompilation] = useState<CompilationState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeRanges, setActiveRanges] = useState<ReadonlyArray<{ start: number; end: number }>>([]);
+  const [activeRanges, setActiveRanges] = useState<
+    ReadonlyArray<SourceRange>
+  >([]);
+  const [activeStrudelRanges, setActiveStrudelRanges] = useState<
+    ReadonlyArray<SourceRange>
+  >([]);
   const [activeTokens, setActiveTokens] = useState<string[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isCompiling, setIsCompiling] = useState(false);
+  const [isAudioPreloaded, setIsAudioPreloaded] = useState(isMockDriver);
 
   useEffect(() => {
     setPlaybackSampleMapSource(
@@ -89,17 +324,41 @@ export function App() {
         },
       },
     );
-    void primePlaybackAudio().catch((primeError) => {
-      setError((primeError as Error).message);
-    });
-  }, []);
+    if (isMockDriver) {
+      return;
+    }
+    void preloadPlaybackAudio()
+      .then(() => {
+        setIsAudioPreloaded(true);
+      })
+      .catch((primeError) => {
+        setError((primeError as Error).message);
+      });
+  }, [isMockDriver]);
 
   useEffect(() => {
-    try {
-      setCompilation(compileSource(defaultBrainfuckSource));
-    } catch (compileError) {
-      setError((compileError as Error).message);
-    }
+    let cancelled = false;
+    setIsCompiling(true);
+    compileSource(defaultBrainfuckSource)
+      .then((nextCompilation) => {
+        if (!cancelled) {
+          setCompilation(nextCompilation);
+          setError(null);
+        }
+      })
+      .catch((compileError) => {
+        if (!cancelled) {
+          setError((compileError as Error).message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsCompiling(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -132,13 +391,19 @@ export function App() {
     [activeRangesCompartment, lintCompartment],
   );
 
-  const handleEvaluate = () => {
+  const handleEvaluate = async () => {
+    setIsCompiling(true);
     try {
-      const nextCompilation = compileSource(source);
+      const nextCompilation = await compileSource(source);
       setCompilation(nextCompilation);
+      setActiveTokens([]);
+      setActiveRanges([]);
+      setActiveStrudelRanges([]);
       setError(null);
     } catch (compileError) {
       setError((compileError as Error).message);
+    } finally {
+      setIsCompiling(false);
     }
   };
 
@@ -154,25 +419,38 @@ export function App() {
     playbackPatternRef.current = null;
     setIsPlaying(false);
     setActiveRanges([]);
+    setActiveStrudelRanges([]);
     setActiveTokens([]);
     stopPlayback();
   };
 
   const handlePlay = async () => {
     try {
-      const nextCompilation = compileSource(source);
+      setIsCompiling(true);
+      if (!isMockDriver) {
+        await primePlaybackAudio();
+      }
+      const nextCompilation = await compileSource(source);
       setCompilation(nextCompilation);
+      setActiveTokens([]);
+      setActiveRanges([]);
+      setActiveStrudelRanges([]);
       setError(null);
+      setIsCompiling(false);
 
       if (isMockDriver) {
-        const tokens = nextCompilation.tokenSources.map((sourceToken) => sourceToken.token);
         let index = 0;
+        const strudelTokens = nextCompilation.strudelTokenSources;
+        const brainfuckTokens = nextCompilation.tokenSources.map(
+          (sourceToken) => sourceToken.token,
+        );
 
-        if (tokens.length === 0) {
+        if (strudelTokens.length === 0 && brainfuckTokens.length === 0) {
           playbackPatternRef.current = { driver: MOCK_DRIVER_QUERY };
           setIsPlaying(true);
           setActiveTokens([]);
           setActiveRanges([]);
+          setActiveStrudelRanges([]);
           return;
         }
 
@@ -180,12 +458,29 @@ export function App() {
         setIsPlaying(true);
         stopTicking();
         tickTimerRef.current = window.setInterval(() => {
-          const token = tokens[index % tokens.length];
+          if (strudelTokens.length > 0) {
+            const activeToken = strudelTokens[index % strudelTokens.length];
+            index += 1;
+            const activeIds = activeToken ? [activeToken.id] : [];
+            setActiveTokens(activeIds);
+            setActiveRanges(
+              selectLoaderRangesForActiveTokens(nextCompilation, activeIds),
+            );
+            setActiveStrudelRanges(
+              strudelTokens
+                .filter((sourceToken) => activeIds.includes(sourceToken.id))
+                .map((sourceToken) => sourceToken.range),
+            );
+            return;
+          }
+
+          const token = brainfuckTokens[index % brainfuckTokens.length];
           if (!token) {
             return;
           }
           index += 1;
           setActiveTokens([token]);
+          setActiveStrudelRanges([]);
           setActiveRanges(
             rangeUnion(
               ...nextCompilation.tokenSources
@@ -197,7 +492,9 @@ export function App() {
         return;
       }
 
-      const pattern = await playStrudelCode(nextCompilation.renderedCode);
+      const pattern = await playStrudelCode(
+        nextCompilation.playableCode ?? nextCompilation.renderedCode,
+      );
       playbackPatternRef.current = pattern;
       setIsPlaying(true);
 
@@ -209,28 +506,73 @@ export function App() {
 
         const now = await getPlaybackCycleNow();
         const haps = playbackPatternRef.current.queryArc(now, now + 1 / 32);
+        if (nextCompilation.strudelTokenSources.length > 0) {
+          const activeIds = selectStrudelTokenIdsFromHaps(
+            nextCompilation.strudelTokenSources,
+            haps,
+          );
+          setActiveTokens(activeIds);
+          setActiveRanges(
+            selectLoaderRangesForActiveTokens(nextCompilation, activeIds),
+          );
+          setActiveStrudelRanges(
+            nextCompilation.strudelTokenSources
+              .filter((sourceToken) => activeIds.includes(sourceToken.id))
+              .map((sourceToken) => sourceToken.range),
+          );
+          return;
+        }
+
         const activeSampleNames = collectActiveSampleNames(
           haps.map((hap: any) => ({
-            whole: [hap.whole?.begin?.toFraction?.() ?? null, hap.whole?.end?.toFraction?.() ?? null],
-            part: [hap.part?.begin?.toFraction?.() ?? null, hap.part?.end?.toFraction?.() ?? null],
+            whole: [
+              hap.whole?.begin?.toFraction?.() ?? null,
+              hap.whole?.end?.toFraction?.() ?? null,
+            ],
+            part: [
+              hap.part?.begin?.toFraction?.() ?? null,
+              hap.part?.end?.toFraction?.() ?? null,
+            ],
             value: { ...(hap.value ?? {}) },
           })),
         );
+        const activeNames = activeSampleNames.length > 0 ? activeSampleNames : [];
 
-        setActiveTokens(activeSampleNames);
+        setActiveTokens(activeNames);
+        setActiveStrudelRanges([]);
         setActiveRanges(
           rangeUnion(
             ...nextCompilation.tokenSources
-              .filter((sourceToken) => activeSampleNames.includes(sourceToken.token))
+              .filter((sourceToken) => activeNames.includes(sourceToken.token))
               .map((sourceToken) => sourceToken.bfRanges),
           ),
         );
       }, 80);
     } catch (playError) {
+      setIsCompiling(false);
       setError((playError as Error).message);
       handleStop();
     }
   };
+
+  const handlePlayPointerDown = () => {
+    if (!isMockDriver) {
+      unlockPlaybackAudioFromGesture();
+    }
+  };
+
+  const playDisabled = !isMockDriver && !isAudioPreloaded;
+  const activeTokenLabels = activeTokens.map((token) => {
+    const strudelToken = compilation?.strudelTokenSources.find(
+      (sourceToken) => sourceToken.id === token,
+    );
+    return strudelToken?.label ?? token;
+  });
+  const hasStrudelTokens = (compilation?.strudelTokenSources.length ?? 0) > 0;
+  const highlightedStrudelCode = renderHighlightedCode(
+    compilation?.renderedCode ?? "",
+    activeStrudelRanges,
+  );
 
   return (
     <div className="app-shell">
@@ -254,16 +596,26 @@ export function App() {
             layer on top, because writing the groove directly would be too easy.
           </p>
         </div>
-        <div className="hero-actions">
-          <button className="button button-ghost" onClick={handleEvaluate}>
-            Evaluate
-          </button>
-          <button className="button button-primary" onClick={handlePlay}>
-            {isPlaying ? "Replay" : "Play"}
-          </button>
-          <button className="button button-ghost" onClick={handleStop}>
-            Stop
-          </button>
+        <div className="hero-control-stack">
+          <div className="hero-actions">
+            <button className="button button-ghost" onClick={handleEvaluate}>
+              {isCompiling ? "Fetching" : "Evaluate"}
+            </button>
+            <button
+              className="button button-primary"
+              disabled={playDisabled}
+              onClick={handlePlay}
+              onPointerDown={handlePlayPointerDown}
+            >
+              {playDisabled ? "Loading Audio" : isPlaying ? "Replay" : "Play"}
+            </button>
+            <button className="button button-ghost" onClick={handleStop}>
+              Stop
+            </button>
+          </div>
+          <p className="audio-help">
+            If you cannot hear anything, press Stop, then Play again.
+          </p>
         </div>
       </header>
 
@@ -272,9 +624,16 @@ export function App() {
           <div className="panel-header">
             <h2>Brainfuck Source</h2>
             <span className="status-chip" data-testid="live-status">
-              {isPlaying ? "Live" : "Idle"}
+              {isPlaying ? "Live" : isCompiling ? "Fetching" : "Idle"}
             </span>
           </div>
+          {compilation?.upstreamSourceUrl ? (
+            <p className="panel-note">
+              This Brainfuck program emits the upstream Strudel source URL.
+              Left-side highlights show loader activity; exact live musical
+              token provenance is shown in the Upstream Strudel pane.
+            </p>
+          ) : null}
           <CodeMirror
             ref={editorRef}
             value={source}
@@ -291,7 +650,9 @@ export function App() {
         <section className="panel panel-inspector">
           <div className="panel-header">
             <h2>Compiler + Runtime</h2>
-            <span className="status-chip">{activeTokens.join(", ") || "No active tokens"}</span>
+            <span className="status-chip">
+              {activeTokenLabels.join(", ") || "No active tokens"}
+            </span>
           </div>
 
           {error ? <div className="error-box">{error}</div> : null}
@@ -303,27 +664,75 @@ export function App() {
             </article>
 
             <article className="card">
-              <h3>Canonical Strudel</h3>
-              <pre data-testid="canonical-strudel">
-                {compilation?.renderedCode ?? ""}
-              </pre>
+              <h3>Upstream Strudel</h3>
+              <pre data-testid="canonical-strudel">{highlightedStrudelCode}</pre>
             </article>
 
+            {compilation?.playableCode &&
+            compilation.playableCode !== compilation.renderedCode ? (
+              <article className="card">
+                <h3>Playback Form</h3>
+                <pre>{compilation.playableCode}</pre>
+              </article>
+            ) : null}
+
+            {compilation?.upstreamSourceUrl ? (
+              <article className="card">
+                <h3>Song Credit</h3>
+                <p>
+                  Stranger Things Strudel cover by{" "}
+                  <a
+                    href={STRANGER_THINGS_REPO_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {STRANGER_THINGS_AUTHOR}
+                  </a>
+                  . Source fetched from{" "}
+                  <a
+                    href={STRANGER_THINGS_SOURCE_PAGE}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    strudel-songs-collection/strangerthings.js
+                  </a>
+                  .
+                </p>
+              </article>
+            ) : null}
+
             <article className="card">
-              <h3>Active Brainfuck Tokens</h3>
+              <h3>
+                {hasStrudelTokens
+                  ? "Active Strudel Tokens"
+                  : "Active Brainfuck Tokens"}
+              </h3>
               <div className="token-list">
-                {compilation?.tokenSources.map((sourceToken) => {
-                  const active = activeTokens.includes(sourceToken.token);
-                  return (
-                    <span
-                      key={`${sourceToken.token}-${sourceToken.miniRange.start}`}
-                      data-testid="token-chip"
-                      className={active ? "token token-active" : "token"}
-                    >
-                      {sourceToken.token}
-                    </span>
-                  );
-                })}
+                {hasStrudelTokens
+                  ? compilation?.strudelTokenSources.map((sourceToken) => {
+                      const active = activeTokens.includes(sourceToken.id);
+                      return (
+                        <span
+                          key={sourceToken.id}
+                          data-testid="token-chip"
+                          className={active ? "token token-active" : "token"}
+                        >
+                          {sourceToken.label}
+                        </span>
+                      );
+                    })
+                  : compilation?.tokenSources.map((sourceToken) => {
+                      const active = activeTokens.includes(sourceToken.token);
+                      return (
+                        <span
+                          key={`${sourceToken.token}-${sourceToken.miniRange.start}`}
+                          data-testid="token-chip"
+                          className={active ? "token token-active" : "token"}
+                        >
+                          {sourceToken.token}
+                        </span>
+                      );
+                    })}
               </div>
             </article>
           </div>
@@ -349,8 +758,10 @@ export function App() {
           .
         </p>
         <p>
-          Drum sounds are small generated WAV files shipped in this repository,
-          so the demo does not download third-party sample packs at runtime.
+          Stranger Things Strudel cover by{" "}
+          <a href={STRANGER_THINGS_REPO_URL}>eefano</a>; this branch fetches the
+          song source from upstream at runtime instead of vendoring unlicensed
+          third-party song code.
         </p>
         <p>
           Source repository:{" "}

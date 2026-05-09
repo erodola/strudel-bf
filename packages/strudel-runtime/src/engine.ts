@@ -11,6 +11,7 @@ let scopeReady: Promise<unknown> | null = null;
 let runtimeReady: Promise<unknown> | null = null;
 let audioReady: Promise<unknown> | null = null;
 let webModulePromise: Promise<typeof import("@strudel/web")> | null = null;
+let webaudioModule: typeof import("@strudel/webaudio") | null = null;
 let webaudioModulePromise: Promise<typeof import("@strudel/webaudio")> | null =
   null;
 
@@ -70,16 +71,50 @@ async function getWebModule(): Promise<typeof import("@strudel/web")> {
 
 async function getWebaudioModule(): Promise<typeof import("@strudel/webaudio")> {
   if (!webaudioModulePromise) {
-    webaudioModulePromise = import("@strudel/webaudio");
+    webaudioModulePromise = import("@strudel/webaudio").then((module) => {
+      webaudioModule = module;
+      return module;
+    });
   }
   return webaudioModulePromise;
 }
 
-export async function primePlaybackAudio(): Promise<void> {
-  const { initAudioOnFirstClick } = await getWebaudioModule();
-  if (!audioReady) {
-    audioReady = initAudioOnFirstClick();
+export async function preloadPlaybackAudio(): Promise<void> {
+  await getWebaudioModule();
+}
+
+function startAudioReady(module: typeof import("@strudel/webaudio")): Promise<void> {
+  return (async () => {
+    const audioContext = module.getAudioContext();
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+    await module.initAudio();
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+  })();
+}
+
+export function unlockPlaybackAudioFromGesture(): void {
+  if (!webaudioModule) {
+    return;
   }
+  if (!audioReady) {
+    audioReady = startAudioReady(webaudioModule);
+    return;
+  }
+  const audioContext = webaudioModule.getAudioContext();
+  if (audioContext.state === "suspended") {
+    void audioContext.resume();
+  }
+}
+
+export async function primePlaybackAudio(): Promise<void> {
+  if (!audioReady) {
+    audioReady = startAudioReady(await getWebaudioModule());
+  }
+  await audioReady;
 }
 
 export function setPlaybackSampleMapSource(config: PlaybackSampleConfig): void {
@@ -105,7 +140,11 @@ export async function initPlaybackRuntime(): Promise<any> {
 export async function playStrudelCode(code: string): Promise<any> {
   await initPlaybackRuntime();
   const { evaluate } = await getWebModule();
-  return evaluate(sanitizePlayableCode(code), true);
+  const pattern = await evaluate(sanitizePlayableCode(code), true);
+  if (!pattern?.queryArc) {
+    throw new Error("Strudel source did not produce a playable pattern");
+  }
+  return pattern;
 }
 
 export async function getPlaybackCycleNow(): Promise<number> {

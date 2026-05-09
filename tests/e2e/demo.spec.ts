@@ -8,20 +8,27 @@ test("renders the default demo", async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByTestId("live-status")).toHaveText("Idle");
   await expect(page.getByTestId("decoded-bf-output")).toContainText(
-    "mini=[bd <hh oh>]*8",
+    "strudel_url=https://raw.githubusercontent.com/eefano/strudel-songs-collection",
   );
   await expect(page.getByTestId("canonical-strudel")).toContainText(
-    '$: s("[bd <hh oh>]*8").bank("tr909").dec(.4)',
+    "setcps(0.7)",
   );
 });
 
-test("updates highlighted Brainfuck tokens while playing", async ({ page }) => {
+test("updates highlighted Strudel tokens while playing", async ({ page }) => {
   await page.goto("/?driver=mock");
 
   await page.getByRole("button", { name: "Play" }).click();
 
   await expect(page.getByTestId("live-status")).toHaveText("Live");
-  await expect(page.locator('[data-testid="token-chip"].token-active').first()).toBeVisible();
+  await expect(page.getByTestId("canonical-strudel")).toContainText(
+    "p2:",
+  );
+  await expect(
+    page.locator('[data-testid="token-chip"].token-active').first(),
+  ).toContainText(/p[12]:/u);
+  await expect(page.locator(".code-active-range").first()).toBeVisible();
+  await expect(page.locator(".cm-bf-active-range")).toHaveCount(1);
 
   await page.getByRole("button", { name: "Stop" }).click();
 

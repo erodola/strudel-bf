@@ -41,6 +41,21 @@ components.
   original repository assets. They are not copied from `tidalcycles/Dirt-Samples`
   or any other third-party sample repository.
 
+## Stranger Things Strudel Cover
+
+- The `stranger-things` branch fetches the Strudel source for
+  `strangerthings.js` from `eefano/strudel-songs-collection` at runtime.
+- Source repository: https://github.com/eefano/strudel-songs-collection
+- Pinned source file:
+  https://github.com/eefano/strudel-songs-collection/blob/a32abf733a4cab967f30eacb4bcecd596c3e2609/strangerthings.js
+- Author credit for the Strudel cover: eefano.
+- GitHub currently reports no declared license for that upstream repository.
+  Because of that, this repository does not vendor or redistribute the song
+  source code.
+- The original Stranger Things main title theme is credited to Kyle Dixon and
+  Michael Stein; this project is an unofficial technical demo and does not claim
+  ownership of Stranger Things, its theme, or related marks.
+
 ## Distribution Notes
 
 - No third-party source trees are vendored in this repository.
