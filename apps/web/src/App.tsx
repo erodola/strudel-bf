@@ -22,6 +22,7 @@ import {
   getPlaybackCycleNow,
   playStrudelCode,
   primePlaybackAudio,
+  preloadPlaybackAudio,
   setPlaybackSampleMapSource,
   stopPlayback,
 } from "@strudel-bf/strudel-runtime";
@@ -164,7 +165,7 @@ export function App() {
         },
       },
     );
-    void primePlaybackAudio().catch((primeError) => {
+    void preloadPlaybackAudio().catch((primeError) => {
       setError((primeError as Error).message);
     });
   }, []);
@@ -256,6 +257,9 @@ export function App() {
   const handlePlay = async () => {
     try {
       setIsCompiling(true);
+      if (!isMockDriver) {
+        await primePlaybackAudio();
+      }
       const nextCompilation = await compileSource(source);
       setCompilation(nextCompilation);
       setError(null);

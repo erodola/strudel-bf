@@ -18,6 +18,8 @@ declare module "@strudel/transpiler" {
 }
 
 declare module "@strudel/webaudio" {
+  export const getAudioContext: (...args: any[]) => AudioContext;
+  export const initAudio: (...args: any[]) => Promise<any>;
   export const initAudioOnFirstClick: (...args: any[]) => Promise<any>;
 }
 

@@ -75,11 +75,25 @@ async function getWebaudioModule(): Promise<typeof import("@strudel/webaudio")> 
   return webaudioModulePromise;
 }
 
+export async function preloadPlaybackAudio(): Promise<void> {
+  await getWebaudioModule();
+}
+
 export async function primePlaybackAudio(): Promise<void> {
-  const { initAudioOnFirstClick } = await getWebaudioModule();
   if (!audioReady) {
-    audioReady = initAudioOnFirstClick();
+    audioReady = (async () => {
+      const { getAudioContext, initAudio } = await getWebaudioModule();
+      const audioContext = getAudioContext();
+      if (audioContext.state === "suspended") {
+        await audioContext.resume();
+      }
+      await initAudio();
+      if (audioContext.state === "suspended") {
+        await audioContext.resume();
+      }
+    })();
   }
+  await audioReady;
 }
 
 export function setPlaybackSampleMapSource(config: PlaybackSampleConfig): void {

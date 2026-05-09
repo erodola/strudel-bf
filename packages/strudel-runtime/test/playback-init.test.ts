@@ -17,7 +17,15 @@ describe("playback initialization", () => {
     const audioReady = new Promise<void>((resolve) => {
       resolveAudioReady = resolve;
     });
-    const initAudioOnFirstClick = vi.fn(() => audioReady);
+    const resume = vi.fn(() => audioReady);
+    const audioContext = {
+      get state() {
+        return resume.mock.calls.length === 0 ? "suspended" : "running";
+      },
+      resume,
+    };
+    const getAudioContext = vi.fn(() => audioContext);
+    const initAudio = vi.fn(async () => undefined);
     const initStrudel = vi.fn(async () => ({
       scheduler: {
         now: () => 0,
@@ -29,7 +37,8 @@ describe("playback initialization", () => {
     const samples = vi.fn(async () => undefined);
 
     vi.doMock("@strudel/webaudio", () => ({
-      initAudioOnFirstClick,
+      getAudioContext,
+      initAudio,
     }));
 
     vi.doMock("@strudel/web", () => ({
@@ -43,7 +52,7 @@ describe("playback initialization", () => {
       "../src/engine.js"
     );
 
-    await primePlaybackAudio();
+    const primePromise = primePlaybackAudio();
 
     let settled = false;
     const runtimePromise = initPlaybackRuntime().then((runtime) => {
@@ -53,12 +62,16 @@ describe("playback initialization", () => {
 
     await waitForCall(initStrudel);
 
-    expect(initAudioOnFirstClick).toHaveBeenCalledTimes(1);
+    expect(getAudioContext).toHaveBeenCalledTimes(1);
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(initAudio).not.toHaveBeenCalled();
     expect(initStrudel).toHaveBeenCalledTimes(1);
     expect(settled).toBe(false);
 
     resolveAudioReady();
 
+    await primePromise;
+    expect(initAudio).toHaveBeenCalledTimes(1);
     await expect(runtimePromise).resolves.toMatchObject({
       scheduler: {
         now: expect.any(Function),
