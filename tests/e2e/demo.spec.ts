@@ -15,7 +15,7 @@ test("renders the default demo", async ({ page }) => {
   );
 });
 
-test("updates highlighted Brainfuck tokens while playing", async ({ page }) => {
+test("updates highlighted Strudel tokens while playing", async ({ page }) => {
   await page.goto("/?driver=mock");
 
   await page.getByRole("button", { name: "Play" }).click();
@@ -24,8 +24,11 @@ test("updates highlighted Brainfuck tokens while playing", async ({ page }) => {
   await expect(page.getByTestId("canonical-strudel")).toContainText(
     "p2:",
   );
-  await expect(page.locator('[data-testid="token-chip"].token-active').first()).toBeVisible();
-  await expect(page.locator(".cm-bf-active-range").first()).toBeVisible();
+  await expect(
+    page.locator('[data-testid="token-chip"].token-active').first(),
+  ).toContainText(/p[12]:/u);
+  await expect(page.locator(".code-active-range").first()).toBeVisible();
+  await expect(page.locator(".cm-bf-active-range")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Stop" }).click();
 

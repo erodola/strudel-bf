@@ -1,11 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { Compartment } from "@codemirror/state";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
-import {
-  executeBrainfuck,
-  type BrainfuckOutputEvent,
-} from "@strudel-bf/bf-core";
+import { executeBrainfuck } from "@strudel-bf/bf-core";
 import {
   brainfuckEditorTheme,
   createActiveRangeExtension,
@@ -17,7 +14,7 @@ import {
   type MiniTokenSource,
   renderProgramToStrudel,
 } from "@strudel-bf/music-compiler";
-import { rangeUnion } from "@strudel-bf/shared";
+import { rangeUnion, type SourceRange } from "@strudel-bf/shared";
 import {
   collectActiveSampleNames,
   getPlaybackCycleNow,
@@ -36,7 +33,16 @@ type CompilationState = {
   renderedCode: string;
   playableCode?: string;
   tokenSources: MiniTokenSource[];
+  strudelTokenSources: StrudelTokenSource[];
   upstreamSourceUrl?: string;
+};
+
+type StrudelTokenSource = {
+  id: string;
+  token: string;
+  label: string;
+  pattern: string;
+  range: SourceRange;
 };
 
 const MOCK_DRIVER_QUERY = "mock";
@@ -49,85 +55,135 @@ const STRANGER_THINGS_SOURCE_URL =
 const STRANGER_THINGS_SOURCE_PAGE =
   "https://github.com/eefano/strudel-songs-collection/blob/a32abf733a4cab967f30eacb4bcecd596c3e2609/strangerthings.js";
 
-function outputRangesForText(
-  output: string,
-  outputEvents: readonly BrainfuckOutputEvent[],
-  text: string,
-) {
-  const start = output.indexOf(text);
-  if (start < 0) {
-    return [];
-  }
-  return rangeUnion(
-    ...outputEvents
-      .slice(start, start + text.length)
-      .map((event) => event.ranges),
-  );
-}
-
-function createLoaderTokenSources(
-  output: string,
-  outputEvents: readonly BrainfuckOutputEvent[],
-  loaderUrl: string,
-): MiniTokenSource[] {
-  const loaderFields = [
-    ["strudel_url", STRUDEL_URL_PREFIX.slice(0, -1)],
-    ["eefano", "eefano"],
-    ["strangerthings", "strangerthings"],
-    ["supersaw", "strudel-songs-collection"],
-  ] as const;
-
-  return loaderFields.map(([token, marker], index) => ({
-    token,
-    miniRange: { start: index, end: index + 1 },
-    bfRanges: outputRangesForText(output, outputEvents, marker || loaderUrl),
-  }));
-}
-
 async function fetchUpstreamStrudelSource(url: string): Promise<string> {
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Could not fetch upstream Strudel source: ${response.status}`);
+    throw new Error(
+      `Could not fetch upstream Strudel source: ${response.status}`,
+    );
   }
   return response.text();
 }
 
-function stripTrailingSemicolon(source: string): string {
-  return source.trim().replace(/;\s*$/u, "");
+function extractStrudelTokenSources(source: string): StrudelTokenSource[] {
+  const tokenSources: StrudelTokenSource[] = [];
+  const lines = source.split(/(\r?\n)/u);
+  let offset = 0;
+  let currentPattern = "global";
+
+  for (let index = 0; index < lines.length; index += 2) {
+    const line = lines[index] ?? "";
+    const newline = lines[index + 1] ?? "";
+    const labelMatch = line.match(/^(\s*)([A-Za-z]\w*)\s*:/u);
+
+    if (labelMatch?.[2]) {
+      currentPattern = labelMatch[2];
+      const start = offset + (labelMatch[1]?.length ?? 0);
+      tokenSources.push({
+        id: `${currentPattern}:label:${start}`,
+        token: currentPattern,
+        label: currentPattern,
+        pattern: currentPattern,
+        range: { start, end: start + currentPattern.length },
+      });
+    }
+
+    const stringLiteralPattern = /"([^"\\]*(?:\\.[^"\\]*)*)"/gu;
+    for (const stringMatch of line.matchAll(stringLiteralPattern)) {
+      const content = stringMatch[1] ?? "";
+      const contentStart = offset + stringMatch.index + 1;
+      const musicalTokenPattern = /[A-Za-z0-9_:#.]+/gu;
+
+      for (const tokenMatch of content.matchAll(musicalTokenPattern)) {
+        const token = tokenMatch[0];
+        const start = contentStart + tokenMatch.index;
+        tokenSources.push({
+          id: `${currentPattern}:${token}:${start}`,
+          token,
+          label:
+            currentPattern === "global" ? token : `${currentPattern}:${token}`,
+          pattern: currentPattern,
+          range: { start, end: start + token.length },
+        });
+      }
+    }
+
+    offset += line.length + newline.length;
+  }
+
+  return tokenSources;
 }
 
-function convertLabelledPatternsToStack(source: string): string {
-  const lines = source.split(/\r?\n/u);
-  const prelude: string[] = [];
-  const patterns: string[] = [];
-  let currentPattern: string[] | null = null;
+function isSourceRange(value: unknown): value is SourceRange {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "start" in value &&
+    "end" in value &&
+    typeof value.start === "number" &&
+    typeof value.end === "number"
+  );
+}
 
-  for (const line of lines) {
-    const labelMatch = line.match(/^\s*[A-Za-z]\w*\s*:\s*(.*)$/u);
-    if (labelMatch) {
-      if (currentPattern) {
-        patterns.push(stripTrailingSemicolon(currentPattern.join("\n")));
-      }
-      currentPattern = [labelMatch[1] ?? ""];
-      continue;
+function rangesOverlap(left: SourceRange, right: SourceRange): boolean {
+  return left.start < right.end && right.start < left.end;
+}
+
+function collectHapLocationRanges(haps: readonly any[]): SourceRange[] {
+  return rangeUnion(
+    ...haps.map((hap) =>
+      Array.isArray(hap.context?.locations)
+        ? hap.context.locations.filter(isSourceRange)
+        : [],
+    ),
+  );
+}
+
+function selectStrudelTokenIdsFromHaps(
+  tokenSources: readonly StrudelTokenSource[],
+  haps: readonly any[],
+): string[] {
+  const ranges = collectHapLocationRanges(haps);
+  if (ranges.length === 0) {
+    return [];
+  }
+
+  return tokenSources
+    .filter((sourceToken) =>
+      ranges.some((range) => rangesOverlap(sourceToken.range, range)),
+    )
+    .map((sourceToken) => sourceToken.id);
+}
+
+function renderHighlightedCode(
+  code: string,
+  ranges: readonly SourceRange[],
+): ReactNode {
+  if (ranges.length === 0) {
+    return code;
+  }
+
+  const normalizedRanges = rangeUnion(ranges);
+  const fragments: ReactNode[] = [];
+  let cursor = 0;
+
+  normalizedRanges.forEach((range, index) => {
+    if (cursor < range.start) {
+      fragments.push(code.slice(cursor, range.start));
     }
+    fragments.push(
+      <span className="code-active-range" key={`${range.start}-${index}`}>
+        {code.slice(range.start, range.end)}
+      </span>,
+    );
+    cursor = range.end;
+  });
 
-    if (currentPattern) {
-      currentPattern.push(line);
-    } else {
-      prelude.push(line);
-    }
+  if (cursor < code.length) {
+    fragments.push(code.slice(cursor));
   }
 
-  if (currentPattern) {
-    patterns.push(stripTrailingSemicolon(currentPattern.join("\n")));
-  }
-
-  if (patterns.length === 0) {
-    return source.trim();
-  }
-
-  return `${prelude.join("\n").trim()}\n\nstack(\n${patterns.join(",\n")}\n)`.trim();
+  return fragments;
 }
 
 async function compileSource(source: string): Promise<CompilationState> {
@@ -143,13 +199,10 @@ async function compileSource(source: string): Promise<CompilationState> {
     return {
       bfOutput: execution.output,
       renderedCode,
-      playableCode: convertLabelledPatternsToStack(renderedCode),
+      playableCode: renderedCode,
       upstreamSourceUrl: loaderUrl,
-      tokenSources: createLoaderTokenSources(
-        execution.output,
-        execution.outputEvents,
-        loaderUrl,
-      ),
+      tokenSources: [],
+      strudelTokenSources: extractStrudelTokenSources(renderedCode),
     };
   }
 
@@ -167,6 +220,7 @@ async function compileSource(source: string): Promise<CompilationState> {
     bfOutput: execution.output,
     renderedCode: rendered.code,
     tokenSources: extractMiniTokenSources(voice.mini),
+    strudelTokenSources: [],
   };
 }
 
@@ -190,7 +244,12 @@ export function App() {
   const [source, setSource] = useState(defaultBrainfuckSource);
   const [compilation, setCompilation] = useState<CompilationState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeRanges, setActiveRanges] = useState<ReadonlyArray<{ start: number; end: number }>>([]);
+  const [activeRanges, setActiveRanges] = useState<
+    ReadonlyArray<SourceRange>
+  >([]);
+  const [activeStrudelRanges, setActiveStrudelRanges] = useState<
+    ReadonlyArray<SourceRange>
+  >([]);
   const [activeTokens, setActiveTokens] = useState<string[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isCompiling, setIsCompiling] = useState(false);
@@ -279,6 +338,9 @@ export function App() {
     try {
       const nextCompilation = await compileSource(source);
       setCompilation(nextCompilation);
+      setActiveTokens([]);
+      setActiveRanges([]);
+      setActiveStrudelRanges([]);
       setError(null);
     } catch (compileError) {
       setError((compileError as Error).message);
@@ -299,6 +361,7 @@ export function App() {
     playbackPatternRef.current = null;
     setIsPlaying(false);
     setActiveRanges([]);
+    setActiveStrudelRanges([]);
     setActiveTokens([]);
     stopPlayback();
   };
@@ -311,18 +374,25 @@ export function App() {
       }
       const nextCompilation = await compileSource(source);
       setCompilation(nextCompilation);
+      setActiveTokens([]);
+      setActiveRanges([]);
+      setActiveStrudelRanges([]);
       setError(null);
       setIsCompiling(false);
 
       if (isMockDriver) {
-        const tokens = nextCompilation.tokenSources.map((sourceToken) => sourceToken.token);
         let index = 0;
+        const strudelTokens = nextCompilation.strudelTokenSources;
+        const brainfuckTokens = nextCompilation.tokenSources.map(
+          (sourceToken) => sourceToken.token,
+        );
 
-        if (tokens.length === 0) {
+        if (strudelTokens.length === 0 && brainfuckTokens.length === 0) {
           playbackPatternRef.current = { driver: MOCK_DRIVER_QUERY };
           setIsPlaying(true);
           setActiveTokens([]);
           setActiveRanges([]);
+          setActiveStrudelRanges([]);
           return;
         }
 
@@ -330,12 +400,27 @@ export function App() {
         setIsPlaying(true);
         stopTicking();
         tickTimerRef.current = window.setInterval(() => {
-          const token = tokens[index % tokens.length];
+          if (strudelTokens.length > 0) {
+            const activeToken = strudelTokens[index % strudelTokens.length];
+            index += 1;
+            const activeIds = activeToken ? [activeToken.id] : [];
+            setActiveTokens(activeIds);
+            setActiveRanges([]);
+            setActiveStrudelRanges(
+              strudelTokens
+                .filter((sourceToken) => activeIds.includes(sourceToken.id))
+                .map((sourceToken) => sourceToken.range),
+            );
+            return;
+          }
+
+          const token = brainfuckTokens[index % brainfuckTokens.length];
           if (!token) {
             return;
           }
           index += 1;
           setActiveTokens([token]);
+          setActiveStrudelRanges([]);
           setActiveRanges(
             rangeUnion(
               ...nextCompilation.tokenSources
@@ -361,21 +446,38 @@ export function App() {
 
         const now = await getPlaybackCycleNow();
         const haps = playbackPatternRef.current.queryArc(now, now + 1 / 32);
+        if (nextCompilation.strudelTokenSources.length > 0) {
+          const activeIds = selectStrudelTokenIdsFromHaps(
+            nextCompilation.strudelTokenSources,
+            haps,
+          );
+          setActiveTokens(activeIds);
+          setActiveRanges([]);
+          setActiveStrudelRanges(
+            nextCompilation.strudelTokenSources
+              .filter((sourceToken) => activeIds.includes(sourceToken.id))
+              .map((sourceToken) => sourceToken.range),
+          );
+          return;
+        }
+
         const activeSampleNames = collectActiveSampleNames(
           haps.map((hap: any) => ({
-            whole: [hap.whole?.begin?.toFraction?.() ?? null, hap.whole?.end?.toFraction?.() ?? null],
-            part: [hap.part?.begin?.toFraction?.() ?? null, hap.part?.end?.toFraction?.() ?? null],
+            whole: [
+              hap.whole?.begin?.toFraction?.() ?? null,
+              hap.whole?.end?.toFraction?.() ?? null,
+            ],
+            part: [
+              hap.part?.begin?.toFraction?.() ?? null,
+              hap.part?.end?.toFraction?.() ?? null,
+            ],
             value: { ...(hap.value ?? {}) },
           })),
         );
-        const activeNames =
-          activeSampleNames.length > 0
-            ? activeSampleNames
-            : nextCompilation.upstreamSourceUrl
-              ? ["supersaw"]
-              : [];
+        const activeNames = activeSampleNames.length > 0 ? activeSampleNames : [];
 
         setActiveTokens(activeNames);
+        setActiveStrudelRanges([]);
         setActiveRanges(
           rangeUnion(
             ...nextCompilation.tokenSources
@@ -398,6 +500,17 @@ export function App() {
   };
 
   const playDisabled = !isMockDriver && !isAudioPreloaded;
+  const activeTokenLabels = activeTokens.map((token) => {
+    const strudelToken = compilation?.strudelTokenSources.find(
+      (sourceToken) => sourceToken.id === token,
+    );
+    return strudelToken?.label ?? token;
+  });
+  const hasStrudelTokens = (compilation?.strudelTokenSources.length ?? 0) > 0;
+  const highlightedStrudelCode = renderHighlightedCode(
+    compilation?.renderedCode ?? "",
+    activeStrudelRanges,
+  );
 
   return (
     <div className="app-shell">
@@ -463,7 +576,9 @@ export function App() {
         <section className="panel panel-inspector">
           <div className="panel-header">
             <h2>Compiler + Runtime</h2>
-            <span className="status-chip">{activeTokens.join(", ") || "No active tokens"}</span>
+            <span className="status-chip">
+              {activeTokenLabels.join(", ") || "No active tokens"}
+            </span>
           </div>
 
           {error ? <div className="error-box">{error}</div> : null}
@@ -476,9 +591,7 @@ export function App() {
 
             <article className="card">
               <h3>Upstream Strudel</h3>
-              <pre data-testid="canonical-strudel">
-                {compilation?.renderedCode ?? ""}
-              </pre>
+              <pre data-testid="canonical-strudel">{highlightedStrudelCode}</pre>
             </article>
 
             {compilation?.playableCode &&
@@ -494,11 +607,19 @@ export function App() {
                 <h3>Song Credit</h3>
                 <p>
                   Stranger Things Strudel cover by{" "}
-                  <a href={STRANGER_THINGS_REPO_URL} target="_blank" rel="noreferrer">
+                  <a
+                    href={STRANGER_THINGS_REPO_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
                     {STRANGER_THINGS_AUTHOR}
                   </a>
                   . Source fetched from{" "}
-                  <a href={STRANGER_THINGS_SOURCE_PAGE} target="_blank" rel="noreferrer">
+                  <a
+                    href={STRANGER_THINGS_SOURCE_PAGE}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
                     strudel-songs-collection/strangerthings.js
                   </a>
                   .
@@ -507,20 +628,37 @@ export function App() {
             ) : null}
 
             <article className="card">
-              <h3>Active Brainfuck Tokens</h3>
+              <h3>
+                {hasStrudelTokens
+                  ? "Active Strudel Tokens"
+                  : "Active Brainfuck Tokens"}
+              </h3>
               <div className="token-list">
-                {compilation?.tokenSources.map((sourceToken) => {
-                  const active = activeTokens.includes(sourceToken.token);
-                  return (
-                    <span
-                      key={`${sourceToken.token}-${sourceToken.miniRange.start}`}
-                      data-testid="token-chip"
-                      className={active ? "token token-active" : "token"}
-                    >
-                      {sourceToken.token}
-                    </span>
-                  );
-                })}
+                {hasStrudelTokens
+                  ? compilation?.strudelTokenSources.map((sourceToken) => {
+                      const active = activeTokens.includes(sourceToken.id);
+                      return (
+                        <span
+                          key={sourceToken.id}
+                          data-testid="token-chip"
+                          className={active ? "token token-active" : "token"}
+                        >
+                          {sourceToken.label}
+                        </span>
+                      );
+                    })
+                  : compilation?.tokenSources.map((sourceToken) => {
+                      const active = activeTokens.includes(sourceToken.token);
+                      return (
+                        <span
+                          key={`${sourceToken.token}-${sourceToken.miniRange.start}`}
+                          data-testid="token-chip"
+                          className={active ? "token token-active" : "token"}
+                        >
+                          {sourceToken.token}
+                        </span>
+                      );
+                    })}
               </div>
             </article>
           </div>

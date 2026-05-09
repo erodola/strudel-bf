@@ -42,8 +42,11 @@ button {
 
 pre {
   margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
+  white-space: pre;
+  overflow-x: auto;
+  overflow-y: hidden;
+  word-break: normal;
+  overflow-wrap: normal;
   font-family: "IBM Plex Mono", "Fira Code", monospace;
   color: var(--code-ink);
 }
@@ -226,6 +229,16 @@ pre {
   border-color: transparent;
   background: linear-gradient(135deg, var(--accent-bright), #65040f);
   box-shadow: 0 0 16px rgba(255, 42, 66, 0.48);
+}
+
+.code-active-range {
+  color: #fff7f8;
+  background: linear-gradient(180deg, rgba(255, 42, 66, 0.56), rgba(121, 6, 20, 0.76));
+  border-radius: 5px;
+  box-decoration-break: clone;
+  box-shadow:
+    0 0 16px rgba(255, 42, 66, 0.48),
+    inset 0 0 0 1px rgba(255, 232, 236, 0.18);
 }
 
 .error-box {
