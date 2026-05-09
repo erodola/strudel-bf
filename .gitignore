@@ -18,3 +18,4 @@ test-results/
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
+resume.txt
