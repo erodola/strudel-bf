@@ -2,7 +2,11 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { Compartment } from "@codemirror/state";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
-import { executeBrainfuck } from "@strudel-bf/bf-core";
+import {
+  eventRangeAt,
+  executeBrainfuck,
+  type BrainfuckOutputEvent,
+} from "@strudel-bf/bf-core";
 import {
   brainfuckEditorTheme,
   createActiveRangeExtension,
@@ -34,6 +38,7 @@ type CompilationState = {
   playableCode?: string;
   tokenSources: MiniTokenSource[];
   strudelTokenSources: StrudelTokenSource[];
+  loaderOutputRanges: SourceRange[][];
   upstreamSourceUrl?: string;
 };
 
@@ -155,6 +160,53 @@ function selectStrudelTokenIdsFromHaps(
     .map((sourceToken) => sourceToken.id);
 }
 
+function getLoaderOutputRanges(
+  output: string,
+  outputEvents: readonly BrainfuckOutputEvent[],
+  loaderUrl: string,
+): SourceRange[][] {
+  const loaderLine = `${STRUDEL_URL_PREFIX}${loaderUrl}`;
+  const start = output.indexOf(loaderLine);
+  if (start < 0) {
+    return [];
+  }
+
+  return Array.from({ length: loaderLine.length }, (_, index) =>
+    eventRangeAt(outputEvents, start + index, start + index + 1),
+  );
+}
+
+function selectLoaderRangesForActiveTokens(
+  compilation: CompilationState,
+  activeTokenIds: readonly string[],
+): SourceRange[] {
+  if (
+    compilation.loaderOutputRanges.length === 0 ||
+    compilation.renderedCode.length === 0 ||
+    activeTokenIds.length === 0
+  ) {
+    return [];
+  }
+
+  const selectedRanges = activeTokenIds.flatMap((activeTokenId) => {
+    const strudelToken = compilation.strudelTokenSources.find(
+      (sourceToken) => sourceToken.id === activeTokenId,
+    );
+    if (!strudelToken) {
+      return [];
+    }
+
+    const ratio = strudelToken.range.start / compilation.renderedCode.length;
+    const rangeIndex = Math.min(
+      compilation.loaderOutputRanges.length - 1,
+      Math.max(0, Math.floor(ratio * compilation.loaderOutputRanges.length)),
+    );
+    return compilation.loaderOutputRanges[rangeIndex] ?? [];
+  });
+
+  return rangeUnion(selectedRanges);
+}
+
 function renderHighlightedCode(
   code: string,
   ranges: readonly SourceRange[],
@@ -203,6 +255,11 @@ async function compileSource(source: string): Promise<CompilationState> {
       upstreamSourceUrl: loaderUrl,
       tokenSources: [],
       strudelTokenSources: extractStrudelTokenSources(renderedCode),
+      loaderOutputRanges: getLoaderOutputRanges(
+        execution.output,
+        execution.outputEvents,
+        loaderUrl,
+      ),
     };
   }
 
@@ -221,6 +278,7 @@ async function compileSource(source: string): Promise<CompilationState> {
     renderedCode: rendered.code,
     tokenSources: extractMiniTokenSources(voice.mini),
     strudelTokenSources: [],
+    loaderOutputRanges: [],
   };
 }
 
@@ -405,7 +463,9 @@ export function App() {
             index += 1;
             const activeIds = activeToken ? [activeToken.id] : [];
             setActiveTokens(activeIds);
-            setActiveRanges([]);
+            setActiveRanges(
+              selectLoaderRangesForActiveTokens(nextCompilation, activeIds),
+            );
             setActiveStrudelRanges(
               strudelTokens
                 .filter((sourceToken) => activeIds.includes(sourceToken.id))
@@ -452,7 +512,9 @@ export function App() {
             haps,
           );
           setActiveTokens(activeIds);
-          setActiveRanges([]);
+          setActiveRanges(
+            selectLoaderRangesForActiveTokens(nextCompilation, activeIds),
+          );
           setActiveStrudelRanges(
             nextCompilation.strudelTokenSources
               .filter((sourceToken) => activeIds.includes(sourceToken.id))
@@ -567,8 +629,9 @@ export function App() {
           </div>
           {compilation?.upstreamSourceUrl ? (
             <p className="panel-note">
-              This Brainfuck program emits the upstream Strudel source URL. Live
-              musical token highlighting is shown in the Upstream Strudel pane.
+              This Brainfuck program emits the upstream Strudel source URL.
+              Left-side highlights show loader activity; exact live musical
+              token provenance is shown in the Upstream Strudel pane.
             </p>
           ) : null}
           <CodeMirror
