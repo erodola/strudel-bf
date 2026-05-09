@@ -22,7 +22,7 @@ export const brainfuckEditorTheme = EditorView.theme({
   "&": {
     backgroundColor: "#02040a",
     color: "#f4e7e9",
-    fontSize: "17px",
+    fontSize: "15px",
     minHeight: "360px",
   },
   ".cm-editor": {
