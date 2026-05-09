@@ -24,6 +24,8 @@ test("updates highlighted Brainfuck tokens while playing", async ({ page }) => {
   await expect(page.getByTestId("canonical-strudel")).toContainText(
     "p2:",
   );
+  await expect(page.locator('[data-testid="token-chip"].token-active').first()).toBeVisible();
+  await expect(page.locator(".cm-bf-active-range").first()).toBeVisible();
 
   await page.getByRole("button", { name: "Stop" }).click();
 

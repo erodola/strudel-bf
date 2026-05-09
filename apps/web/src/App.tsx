@@ -4,6 +4,7 @@ import { Compartment } from "@codemirror/state";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import {
   executeBrainfuck,
+  type BrainfuckOutputEvent,
 } from "@strudel-bf/bf-core";
 import {
   brainfuckEditorTheme,
@@ -47,6 +48,41 @@ const STRANGER_THINGS_SOURCE_URL =
   "https://raw.githubusercontent.com/eefano/strudel-songs-collection/a32abf733a4cab967f30eacb4bcecd596c3e2609/strangerthings.js";
 const STRANGER_THINGS_SOURCE_PAGE =
   "https://github.com/eefano/strudel-songs-collection/blob/a32abf733a4cab967f30eacb4bcecd596c3e2609/strangerthings.js";
+
+function outputRangesForText(
+  output: string,
+  outputEvents: readonly BrainfuckOutputEvent[],
+  text: string,
+) {
+  const start = output.indexOf(text);
+  if (start < 0) {
+    return [];
+  }
+  return rangeUnion(
+    ...outputEvents
+      .slice(start, start + text.length)
+      .map((event) => event.ranges),
+  );
+}
+
+function createLoaderTokenSources(
+  output: string,
+  outputEvents: readonly BrainfuckOutputEvent[],
+  loaderUrl: string,
+): MiniTokenSource[] {
+  const loaderFields = [
+    ["strudel_url", STRUDEL_URL_PREFIX.slice(0, -1)],
+    ["eefano", "eefano"],
+    ["strangerthings", "strangerthings"],
+    ["supersaw", "strudel-songs-collection"],
+  ] as const;
+
+  return loaderFields.map(([token, marker], index) => ({
+    token,
+    miniRange: { start: index, end: index + 1 },
+    bfRanges: outputRangesForText(output, outputEvents, marker || loaderUrl),
+  }));
+}
 
 async function fetchUpstreamStrudelSource(url: string): Promise<string> {
   const response = await fetch(url);
@@ -109,7 +145,11 @@ async function compileSource(source: string): Promise<CompilationState> {
       renderedCode,
       playableCode: convertLabelledPatternsToStack(renderedCode),
       upstreamSourceUrl: loaderUrl,
-      tokenSources: [],
+      tokenSources: createLoaderTokenSources(
+        execution.output,
+        execution.outputEvents,
+        loaderUrl,
+      ),
     };
   }
 
@@ -328,12 +368,18 @@ export function App() {
             value: { ...(hap.value ?? {}) },
           })),
         );
+        const activeNames =
+          activeSampleNames.length > 0
+            ? activeSampleNames
+            : nextCompilation.upstreamSourceUrl
+              ? ["supersaw"]
+              : [];
 
-        setActiveTokens(activeSampleNames);
+        setActiveTokens(activeNames);
         setActiveRanges(
           rangeUnion(
             ...nextCompilation.tokenSources
-              .filter((sourceToken) => activeSampleNames.includes(sourceToken.token))
+              .filter((sourceToken) => activeNames.includes(sourceToken.token))
               .map((sourceToken) => sourceToken.bfRanges),
           ),
         );
