@@ -60,7 +60,9 @@ The runtime is built on Strudel packages, which are licensed as
 CodeMirror, and the interface uses React and Vite. See
 `THIRD_PARTY_NOTICES.md` for the main upstream projects and attribution notes.
 
-The Stranger Things Strudel cover is by eefano and is fetched from
-`eefano/strudel-songs-collection` at runtime. That upstream repository does not
-declare a license in GitHub metadata, so this branch links to and fetches the
-song source instead of vendoring a copy into this repository.
+The Stranger Things Strudel cover is by
+[eefano](https://github.com/eefano) and is fetched from
+[eefano/strudel-songs-collection](https://github.com/eefano/strudel-songs-collection)
+at runtime. That upstream repository does not declare a license in GitHub
+metadata, so this branch links to and fetches the song source instead of
+vendoring a copy into this repository.
