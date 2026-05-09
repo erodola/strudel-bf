@@ -13,6 +13,7 @@ import {
 import {
   decodeBrainfuckMusicOutput,
   extractMiniTokenSources,
+  type MiniTokenSource,
   renderProgramToStrudel,
 } from "@strudel-bf/music-compiler";
 import { rangeUnion } from "@strudel-bf/shared";
@@ -30,13 +31,58 @@ import defaultBrainfuckSource from "../../../fixtures/landing-page-demo.bf?raw";
 type CompilationState = {
   bfOutput: string;
   renderedCode: string;
-  tokenSources: ReturnType<typeof extractMiniTokenSources>;
+  tokenSources: MiniTokenSource[];
+  upstreamSourceUrl?: string;
 };
 
 const MOCK_DRIVER_QUERY = "mock";
+const STRUDEL_URL_PREFIX = "strudel_url=";
+const STRANGER_THINGS_AUTHOR = "eefano";
+const STRANGER_THINGS_REPO_URL =
+  "https://github.com/eefano/strudel-songs-collection";
+const STRANGER_THINGS_SOURCE_URL =
+  "https://raw.githubusercontent.com/eefano/strudel-songs-collection/a32abf733a4cab967f30eacb4bcecd596c3e2609/strangerthings.js";
+const STRANGER_THINGS_SOURCE_PAGE =
+  "https://github.com/eefano/strudel-songs-collection/blob/a32abf733a4cab967f30eacb4bcecd596c3e2609/strangerthings.js";
 
-function compileSource(source: string): CompilationState {
+function collectLoaderRanges(
+  outputEvents: ReturnType<typeof executeBrainfuck>["outputEvents"],
+) {
+  return rangeUnion(...outputEvents.map((event) => event.ranges));
+}
+
+async function fetchUpstreamStrudelSource(url: string): Promise<string> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Could not fetch upstream Strudel source: ${response.status}`);
+  }
+  return response.text();
+}
+
+async function compileSource(source: string): Promise<CompilationState> {
   const execution = executeBrainfuck(source);
+  const loaderUrl = execution.output
+    .split(/\r?\n/u)
+    .find((line) => line.startsWith(STRUDEL_URL_PREFIX))
+    ?.slice(STRUDEL_URL_PREFIX.length)
+    .trim();
+
+  if (loaderUrl) {
+    const renderedCode = (await fetchUpstreamStrudelSource(loaderUrl)).trim();
+    return {
+      bfOutput: execution.output,
+      renderedCode,
+      upstreamSourceUrl: loaderUrl,
+      tokenSources: [
+        {
+          token: "supersaw",
+          miniRange: { start: 0, end: renderedCode.length },
+          bfRanges: collectLoaderRanges(execution.outputEvents),
+        },
+      ],
+    };
+  }
+
   const program = decodeBrainfuckMusicOutput(
     execution.output,
     execution.outputEvents,
@@ -77,6 +123,7 @@ export function App() {
   const [activeRanges, setActiveRanges] = useState<ReadonlyArray<{ start: number; end: number }>>([]);
   const [activeTokens, setActiveTokens] = useState<string[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isCompiling, setIsCompiling] = useState(false);
 
   useEffect(() => {
     setPlaybackSampleMapSource(
@@ -95,11 +142,28 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    try {
-      setCompilation(compileSource(defaultBrainfuckSource));
-    } catch (compileError) {
-      setError((compileError as Error).message);
-    }
+    let cancelled = false;
+    setIsCompiling(true);
+    compileSource(defaultBrainfuckSource)
+      .then((nextCompilation) => {
+        if (!cancelled) {
+          setCompilation(nextCompilation);
+          setError(null);
+        }
+      })
+      .catch((compileError) => {
+        if (!cancelled) {
+          setError((compileError as Error).message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsCompiling(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -132,13 +196,16 @@ export function App() {
     [activeRangesCompartment, lintCompartment],
   );
 
-  const handleEvaluate = () => {
+  const handleEvaluate = async () => {
+    setIsCompiling(true);
     try {
-      const nextCompilation = compileSource(source);
+      const nextCompilation = await compileSource(source);
       setCompilation(nextCompilation);
       setError(null);
     } catch (compileError) {
       setError((compileError as Error).message);
+    } finally {
+      setIsCompiling(false);
     }
   };
 
@@ -160,9 +227,11 @@ export function App() {
 
   const handlePlay = async () => {
     try {
-      const nextCompilation = compileSource(source);
+      setIsCompiling(true);
+      const nextCompilation = await compileSource(source);
       setCompilation(nextCompilation);
       setError(null);
+      setIsCompiling(false);
 
       if (isMockDriver) {
         const tokens = nextCompilation.tokenSources.map((sourceToken) => sourceToken.token);
@@ -227,6 +296,7 @@ export function App() {
         );
       }, 80);
     } catch (playError) {
+      setIsCompiling(false);
       setError((playError as Error).message);
       handleStop();
     }
@@ -252,11 +322,16 @@ export function App() {
               Brainfuck
             </a>{" "}
             layer on top, because writing the groove directly would be too easy.
+            This branch plays{" "}
+            <a href={STRANGER_THINGS_SOURCE_PAGE} target="_blank" rel="noreferrer">
+              eefano&apos;s Stranger Things Strudel cover
+            </a>{" "}
+            from its upstream source URL.
           </p>
         </div>
         <div className="hero-actions">
           <button className="button button-ghost" onClick={handleEvaluate}>
-            Evaluate
+            {isCompiling ? "Fetching" : "Evaluate"}
           </button>
           <button className="button button-primary" onClick={handlePlay}>
             {isPlaying ? "Replay" : "Play"}
@@ -272,7 +347,7 @@ export function App() {
           <div className="panel-header">
             <h2>Brainfuck Source</h2>
             <span className="status-chip" data-testid="live-status">
-              {isPlaying ? "Live" : "Idle"}
+              {isPlaying ? "Live" : isCompiling ? "Fetching" : "Idle"}
             </span>
           </div>
           <CodeMirror
@@ -303,11 +378,28 @@ export function App() {
             </article>
 
             <article className="card">
-              <h3>Canonical Strudel</h3>
+              <h3>Upstream Strudel</h3>
               <pre data-testid="canonical-strudel">
                 {compilation?.renderedCode ?? ""}
               </pre>
             </article>
+
+            {compilation?.upstreamSourceUrl ? (
+              <article className="card">
+                <h3>Song Credit</h3>
+                <p>
+                  Stranger Things Strudel cover by{" "}
+                  <a href={STRANGER_THINGS_REPO_URL} target="_blank" rel="noreferrer">
+                    {STRANGER_THINGS_AUTHOR}
+                  </a>
+                  . Source fetched from{" "}
+                  <a href={STRANGER_THINGS_SOURCE_PAGE} target="_blank" rel="noreferrer">
+                    strudel-songs-collection/strangerthings.js
+                  </a>
+                  .
+                </p>
+              </article>
+            ) : null}
 
             <article className="card">
               <h3>Active Brainfuck Tokens</h3>
@@ -349,8 +441,10 @@ export function App() {
           .
         </p>
         <p>
-          Drum sounds are small generated WAV files shipped in this repository,
-          so the demo does not download third-party sample packs at runtime.
+          Stranger Things Strudel cover by{" "}
+          <a href={STRANGER_THINGS_REPO_URL}>eefano</a>; this branch fetches the
+          song source from upstream at runtime instead of vendoring unlicensed
+          third-party song code.
         </p>
         <p>
           Source repository:{" "}

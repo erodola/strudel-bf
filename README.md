@@ -1,15 +1,14 @@
 # Strudel Brainfuck REPL
 
-A browser demo that puts a Brainfuck layer on top of the Strudel REPL. The app
-compiles Brainfuck into a small music IR, renders canonical Strudel code, plays
-it through Strudel's runtime, and highlights the Brainfuck source ranges that
-produce the active beat.
+A browser demo that puts a Brainfuck layer on top of the Strudel REPL. On the
+`stranger-things` branch, the default Brainfuck program emits a pinned upstream
+source URL for eefano's Stranger Things Strudel cover, fetches that source at
+runtime, plays it through Strudel's runtime, and highlights the loader ranges
+that produced the active synth voice.
 
-The bundled demo plays:
+The default loader points at:
 
-```strudel
-$: s("[bd <hh oh>]*8").bank("tr909").dec(.4)
-```
+https://github.com/eefano/strudel-songs-collection/blob/a32abf733a4cab967f30eacb4bcecd596c3e2609/strangerthings.js
 
 ## Quickstart
 
@@ -25,12 +24,11 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`, then click `Play`.
+Open `http://localhost:5173`, wait for the upstream Strudel source to load, then
+click `Play`.
 
 The first play can take a few seconds while the browser audio runtime starts.
-The drum sounds are local generated WAV files in
-`apps/web/public/samples/demo-tr909/`, so the app does not download third-party
-sample packs at runtime.
+This branch requires network access to fetch the credited upstream song source.
 
 ## Scripts
 
@@ -59,18 +57,6 @@ npx playwright install chromium
 - `fixtures`: demo Brainfuck program and reference Strudel snippet
 - `docs/adr`: short architecture decision records
 
-## Audio Assets
-
-The demo WAV files are generated from `scripts/generate-demo-samples.mjs`.
-They are intentionally checked in so a clone can run the interface immediately
-without relying on external sample repositories.
-
-To regenerate them:
-
-```sh
-node scripts/generate-demo-samples.mjs
-```
-
 ## License And Attribution
 
 This project is licensed under `AGPL-3.0-only`.
@@ -79,3 +65,8 @@ The runtime is built on Strudel packages, which are licensed as
 `AGPL-3.0-or-later` in their installed package metadata. The editor uses
 CodeMirror, and the interface uses React and Vite. See
 `THIRD_PARTY_NOTICES.md` for the main upstream projects and attribution notes.
+
+The Stranger Things Strudel cover is by eefano and is fetched from
+`eefano/strudel-songs-collection` at runtime. That upstream repository does not
+declare a license in GitHub metadata, so this branch links to and fetches the
+song source instead of vendoring a copy into this repository.

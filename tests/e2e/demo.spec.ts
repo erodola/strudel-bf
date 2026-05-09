@@ -8,10 +8,10 @@ test("renders the default demo", async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByTestId("live-status")).toHaveText("Idle");
   await expect(page.getByTestId("decoded-bf-output")).toContainText(
-    "mini=[bd <hh oh>]*8",
+    "strudel_url=https://raw.githubusercontent.com/eefano/strudel-songs-collection",
   );
   await expect(page.getByTestId("canonical-strudel")).toContainText(
-    '$: s("[bd <hh oh>]*8").bank("tr909").dec(.4)',
+    "setcps(0.7)",
   );
 });
 

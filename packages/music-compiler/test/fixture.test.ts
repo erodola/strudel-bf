@@ -5,28 +5,16 @@ import { describe, expect, it } from "vitest";
 
 import { executeBrainfuck } from "@strudel-bf/bf-core";
 
-import {
-  decodeBrainfuckMusicOutput,
-  renderProgramToStrudel,
-} from "../src/index.js";
-
 describe("landing-page Brainfuck fixture", () => {
-  it("renders exactly to the reference snippet", () => {
+  it("outputs the pinned Stranger Things upstream source URL", () => {
     const source = readFileSync(
       resolve(import.meta.dirname, "../../../fixtures/landing-page-demo.bf"),
       "utf8",
     );
 
     const execution = executeBrainfuck(source);
-    const program = decodeBrainfuckMusicOutput(
-      execution.output,
-      execution.outputEvents,
-    );
-    const rendered = renderProgramToStrudel(program);
-
-    expect(execution.output).toBe("mini=[bd <hh oh>]*8\nbank=tr909\ndec=.4\n");
-    expect(rendered.code).toBe(
-      '$: s("[bd <hh oh>]*8").bank("tr909").dec(.4)',
+    expect(execution.output).toBe(
+      "strudel_url=https://raw.githubusercontent.com/eefano/strudel-songs-collection/a32abf733a4cab967f30eacb4bcecd596c3e2609/strangerthings.js\n",
     );
   });
 });
