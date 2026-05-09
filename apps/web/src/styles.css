@@ -102,10 +102,26 @@ pre {
   text-underline-offset: 0.18em;
 }
 
+.hero-control-stack {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
 .hero-actions {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.audio-help {
+  max-width: 320px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: right;
 }
 
 .button {
@@ -273,5 +289,17 @@ pre {
 
   .workspace {
     grid-template-columns: 1fr;
+  }
+
+  .hero-control-stack {
+    justify-items: start;
+  }
+
+  .hero-actions {
+    justify-content: flex-start;
+  }
+
+  .audio-help {
+    text-align: left;
   }
 }

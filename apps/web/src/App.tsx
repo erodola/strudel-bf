@@ -534,21 +534,26 @@ export function App() {
             layer on top, because writing the groove directly would be too easy.
           </p>
         </div>
-        <div className="hero-actions">
-          <button className="button button-ghost" onClick={handleEvaluate}>
-            {isCompiling ? "Fetching" : "Evaluate"}
-          </button>
-          <button
-            className="button button-primary"
-            disabled={playDisabled}
-            onClick={handlePlay}
-            onPointerDown={handlePlayPointerDown}
-          >
-            {playDisabled ? "Loading Audio" : isPlaying ? "Replay" : "Play"}
-          </button>
-          <button className="button button-ghost" onClick={handleStop}>
-            Stop
-          </button>
+        <div className="hero-control-stack">
+          <div className="hero-actions">
+            <button className="button button-ghost" onClick={handleEvaluate}>
+              {isCompiling ? "Fetching" : "Evaluate"}
+            </button>
+            <button
+              className="button button-primary"
+              disabled={playDisabled}
+              onClick={handlePlay}
+              onPointerDown={handlePlayPointerDown}
+            >
+              {playDisabled ? "Loading Audio" : isPlaying ? "Replay" : "Play"}
+            </button>
+            <button className="button button-ghost" onClick={handleStop}>
+              Stop
+            </button>
+          </div>
+          <p className="audio-help">
+            If you cannot hear anything, press Stop, then Play again.
+          </p>
         </div>
       </header>
 
