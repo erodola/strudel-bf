@@ -2,7 +2,7 @@
 
 A browser demo that puts a Brainfuck layer on top of the Strudel REPL. 
 
-![Strudel Brainfuck REPL Stranger Things interface](docs/assets/stranger-things-teaser.png)
+![Strudel Brainfuck REPL playing Stranger Things](docs/assets/strudel-brainfuck-playing.gif)
 
 ## Quickstart
 
