@@ -28,7 +28,7 @@ test("updates highlighted Strudel tokens while playing", async ({ page }) => {
     page.locator('[data-testid="token-chip"].token-active').first(),
   ).toContainText(/p[12]:/u);
   await expect(page.locator(".code-active-range").first()).toBeVisible();
-  await expect(page.locator(".cm-bf-active-range").first()).toBeVisible();
+  await expect(page.locator(".cm-bf-active-range")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Stop" }).click();
 
