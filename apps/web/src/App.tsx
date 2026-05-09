@@ -2,7 +2,11 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { Compartment } from "@codemirror/state";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
-import { executeBrainfuck } from "@strudel-bf/bf-core";
+import {
+  eventRangeAt,
+  executeBrainfuck,
+  type BrainfuckOutputEvent,
+} from "@strudel-bf/bf-core";
 import {
   brainfuckEditorTheme,
   createActiveRangeExtension,
@@ -34,6 +38,7 @@ type CompilationState = {
   playableCode?: string;
   tokenSources: MiniTokenSource[];
   strudelTokenSources: StrudelTokenSource[];
+  loaderBfRanges: SourceRange[];
   upstreamSourceUrl?: string;
 };
 
@@ -155,6 +160,19 @@ function selectStrudelTokenIdsFromHaps(
     .map((sourceToken) => sourceToken.id);
 }
 
+function getLoaderBrainfuckRanges(
+  output: string,
+  outputEvents: readonly BrainfuckOutputEvent[],
+  loaderUrl: string,
+): SourceRange[] {
+  const start = output.indexOf(`${STRUDEL_URL_PREFIX}${loaderUrl}`);
+  if (start < 0) {
+    return [];
+  }
+  const end = start + STRUDEL_URL_PREFIX.length + loaderUrl.length;
+  return eventRangeAt(outputEvents, start, end);
+}
+
 function renderHighlightedCode(
   code: string,
   ranges: readonly SourceRange[],
@@ -203,6 +221,11 @@ async function compileSource(source: string): Promise<CompilationState> {
       upstreamSourceUrl: loaderUrl,
       tokenSources: [],
       strudelTokenSources: extractStrudelTokenSources(renderedCode),
+      loaderBfRanges: getLoaderBrainfuckRanges(
+        execution.output,
+        execution.outputEvents,
+        loaderUrl,
+      ),
     };
   }
 
@@ -221,6 +244,7 @@ async function compileSource(source: string): Promise<CompilationState> {
     renderedCode: rendered.code,
     tokenSources: extractMiniTokenSources(voice.mini),
     strudelTokenSources: [],
+    loaderBfRanges: [],
   };
 }
 
@@ -405,7 +429,9 @@ export function App() {
             index += 1;
             const activeIds = activeToken ? [activeToken.id] : [];
             setActiveTokens(activeIds);
-            setActiveRanges([]);
+            setActiveRanges(
+              activeIds.length > 0 ? nextCompilation.loaderBfRanges : [],
+            );
             setActiveStrudelRanges(
               strudelTokens
                 .filter((sourceToken) => activeIds.includes(sourceToken.id))
@@ -452,7 +478,9 @@ export function App() {
             haps,
           );
           setActiveTokens(activeIds);
-          setActiveRanges([]);
+          setActiveRanges(
+            activeIds.length > 0 ? nextCompilation.loaderBfRanges : [],
+          );
           setActiveStrudelRanges(
             nextCompilation.strudelTokenSources
               .filter((sourceToken) => activeIds.includes(sourceToken.id))

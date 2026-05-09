@@ -42,9 +42,8 @@ button {
 
 pre {
   margin: 0;
-  white-space: pre;
-  overflow-x: auto;
-  overflow-y: hidden;
+  white-space: pre-wrap;
+  overflow-x: hidden;
   word-break: normal;
   overflow-wrap: normal;
   font-family: "IBM Plex Mono", "Fira Code", monospace;
