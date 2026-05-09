@@ -10,6 +10,8 @@ The default loader points at:
 
 https://github.com/eefano/strudel-songs-collection/blob/a32abf733a4cab967f30eacb4bcecd596c3e2609/strangerthings.js
 
+![Strudel Brainfuck REPL Stranger Things interface](docs/assets/stranger-things-teaser.png)
+
 ## Quickstart
 
 Requirements:
