@@ -59,6 +59,13 @@ const STRANGER_THINGS_SOURCE_URL =
   "https://raw.githubusercontent.com/eefano/strudel-songs-collection/a32abf733a4cab967f30eacb4bcecd596c3e2609/strangerthings.js";
 const STRANGER_THINGS_SOURCE_PAGE =
   "https://github.com/eefano/strudel-songs-collection/blob/a32abf733a4cab967f30eacb4bcecd596c3e2609/strangerthings.js";
+const DEFAULT_BRAINFUCK_SOURCE = normalizeBrainfuckSource(
+  defaultBrainfuckSource,
+);
+
+function normalizeBrainfuckSource(source: string): string {
+  return source.replace(/\r\n?/gu, "\n");
+}
 
 async function fetchUpstreamStrudelSource(url: string): Promise<string> {
   const response = await fetch(url);
@@ -239,7 +246,7 @@ function renderHighlightedCode(
 }
 
 async function compileSource(source: string): Promise<CompilationState> {
-  const execution = executeBrainfuck(source);
+  const execution = executeBrainfuck(normalizeBrainfuckSource(source));
   const loaderUrl = execution.output
     .split(/\r?\n/u)
     .find((line) => line.startsWith(STRUDEL_URL_PREFIX))
@@ -299,7 +306,7 @@ export function App() {
     );
   }, []);
 
-  const [source, setSource] = useState(defaultBrainfuckSource);
+  const [source, setSource] = useState(DEFAULT_BRAINFUCK_SOURCE);
   const [compilation, setCompilation] = useState<CompilationState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeRanges, setActiveRanges] = useState<
@@ -339,7 +346,7 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     setIsCompiling(true);
-    compileSource(defaultBrainfuckSource)
+    compileSource(DEFAULT_BRAINFUCK_SOURCE)
       .then((nextCompilation) => {
         if (!cancelled) {
           setCompilation(nextCompilation);
@@ -643,7 +650,9 @@ export function App() {
               lineNumbers: true,
             }}
             extensions={extensions}
-            onChange={setSource}
+            onChange={(nextSource) => {
+              setSource(normalizeBrainfuckSource(nextSource));
+            }}
           />
         </section>
 

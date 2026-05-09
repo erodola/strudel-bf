@@ -29,6 +29,7 @@ test("updates highlighted Strudel tokens while playing", async ({ page }) => {
   ).toContainText(/p[12]:/u);
   await expect(page.locator(".code-active-range").first()).toBeVisible();
   await expect(page.locator(".cm-bf-active-range")).toHaveCount(1);
+  await expect(page.locator(".cm-bf-active-range").first()).toHaveText(".");
 
   await page.getByRole("button", { name: "Stop" }).click();
 
