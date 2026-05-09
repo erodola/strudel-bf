@@ -352,11 +352,6 @@ export function App() {
               Brainfuck
             </a>{" "}
             layer on top, because writing the groove directly would be too easy.
-            This branch plays{" "}
-            <a href={STRANGER_THINGS_SOURCE_PAGE} target="_blank" rel="noreferrer">
-              eefano&apos;s Stranger Things Strudel cover
-            </a>{" "}
-            from its upstream source URL.
           </p>
         </div>
         <div className="hero-actions">

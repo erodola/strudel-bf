@@ -20,40 +20,41 @@ export function createActiveRangeExtension(ranges: readonly SourceRange[]): Exte
 
 export const brainfuckEditorTheme = EditorView.theme({
   "&": {
-    backgroundColor: "#0b0707",
-    color: "#f2e7d0",
+    backgroundColor: "#02040a",
+    color: "#f4e7e9",
     fontSize: "15px",
     minHeight: "360px",
   },
   ".cm-editor": {
-    backgroundColor: "#0b0707",
+    backgroundColor: "#02040a",
   },
   ".cm-content": {
     fontFamily: "'IBM Plex Mono', 'Fira Code', monospace",
-    caretColor: "#ff6a3d",
+    caretColor: "#ff2a42",
   },
   ".cm-line": {
-    color: "#f2e7d0",
+    color: "#f4e7e9",
   },
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
-    backgroundColor: "rgba(255, 106, 61, 0.28)",
+    backgroundColor: "rgba(255, 42, 66, 0.3)",
   },
   ".cm-scroller": {
-    backgroundColor: "#0b0707",
+    backgroundColor: "#02040a",
     overflow: "auto",
   },
   ".cm-bf-active-range": {
-    backgroundColor: "rgba(255, 106, 61, 0.34)",
-    outline: "1px solid rgba(255, 106, 61, 0.95)",
+    backgroundColor: "rgba(255, 42, 66, 0.36)",
+    outline: "1px solid rgba(255, 42, 66, 0.95)",
     borderRadius: "3px",
+    boxShadow: "0 0 12px rgba(255, 42, 66, 0.45)",
   },
   ".cm-gutters": {
-    backgroundColor: "#120b0a",
-    color: "#9f8065",
-    borderRight: "1px solid #4e2a24",
+    backgroundColor: "#050711",
+    color: "#7d8797",
+    borderRight: "1px solid rgba(255, 42, 66, 0.22)",
   },
   ".cm-activeLineGutter": {
-    backgroundColor: "rgba(211, 58, 44, 0.16)",
-    color: "#f2e7d0",
+    backgroundColor: "rgba(227, 18, 47, 0.2)",
+    color: "#f4e7e9",
   },
 });
