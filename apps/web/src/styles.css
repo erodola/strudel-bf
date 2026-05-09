@@ -115,6 +115,11 @@ pre {
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
 }
 
+.button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
 .button-primary {
   background: linear-gradient(135deg, var(--accent-bright), #65040f);
   color: white;

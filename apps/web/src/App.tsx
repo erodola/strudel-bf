@@ -25,6 +25,7 @@ import {
   preloadPlaybackAudio,
   setPlaybackSampleMapSource,
   stopPlayback,
+  unlockPlaybackAudioFromGesture,
 } from "@strudel-bf/strudel-runtime";
 
 import defaultBrainfuckSource from "../../../fixtures/landing-page-demo.bf?raw";
@@ -153,6 +154,7 @@ export function App() {
   const [activeTokens, setActiveTokens] = useState<string[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isCompiling, setIsCompiling] = useState(false);
+  const [isAudioPreloaded, setIsAudioPreloaded] = useState(isMockDriver);
 
   useEffect(() => {
     setPlaybackSampleMapSource(
@@ -165,10 +167,17 @@ export function App() {
         },
       },
     );
-    void preloadPlaybackAudio().catch((primeError) => {
-      setError((primeError as Error).message);
-    });
-  }, []);
+    if (isMockDriver) {
+      return;
+    }
+    void preloadPlaybackAudio()
+      .then(() => {
+        setIsAudioPreloaded(true);
+      })
+      .catch((primeError) => {
+        setError((primeError as Error).message);
+      });
+  }, [isMockDriver]);
 
   useEffect(() => {
     let cancelled = false;
@@ -336,6 +345,14 @@ export function App() {
     }
   };
 
+  const handlePlayPointerDown = () => {
+    if (!isMockDriver) {
+      unlockPlaybackAudioFromGesture();
+    }
+  };
+
+  const playDisabled = !isMockDriver && !isAudioPreloaded;
+
   return (
     <div className="app-shell">
       <header className="hero">
@@ -362,8 +379,13 @@ export function App() {
           <button className="button button-ghost" onClick={handleEvaluate}>
             {isCompiling ? "Fetching" : "Evaluate"}
           </button>
-          <button className="button button-primary" onClick={handlePlay}>
-            {isPlaying ? "Replay" : "Play"}
+          <button
+            className="button button-primary"
+            disabled={playDisabled}
+            onClick={handlePlay}
+            onPointerDown={handlePlayPointerDown}
+          >
+            {playDisabled ? "Loading Audio" : isPlaying ? "Replay" : "Play"}
           </button>
           <button className="button button-ghost" onClick={handleStop}>
             Stop

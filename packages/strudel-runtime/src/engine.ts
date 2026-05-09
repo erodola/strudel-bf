@@ -11,6 +11,7 @@ let scopeReady: Promise<unknown> | null = null;
 let runtimeReady: Promise<unknown> | null = null;
 let audioReady: Promise<unknown> | null = null;
 let webModulePromise: Promise<typeof import("@strudel/web")> | null = null;
+let webaudioModule: typeof import("@strudel/webaudio") | null = null;
 let webaudioModulePromise: Promise<typeof import("@strudel/webaudio")> | null =
   null;
 
@@ -70,7 +71,10 @@ async function getWebModule(): Promise<typeof import("@strudel/web")> {
 
 async function getWebaudioModule(): Promise<typeof import("@strudel/webaudio")> {
   if (!webaudioModulePromise) {
-    webaudioModulePromise = import("@strudel/webaudio");
+    webaudioModulePromise = import("@strudel/webaudio").then((module) => {
+      webaudioModule = module;
+      return module;
+    });
   }
   return webaudioModulePromise;
 }
@@ -79,19 +83,36 @@ export async function preloadPlaybackAudio(): Promise<void> {
   await getWebaudioModule();
 }
 
+function startAudioReady(module: typeof import("@strudel/webaudio")): Promise<void> {
+  return (async () => {
+    const audioContext = module.getAudioContext();
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+    await module.initAudio();
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+  })();
+}
+
+export function unlockPlaybackAudioFromGesture(): void {
+  if (!webaudioModule) {
+    return;
+  }
+  if (!audioReady) {
+    audioReady = startAudioReady(webaudioModule);
+    return;
+  }
+  const audioContext = webaudioModule.getAudioContext();
+  if (audioContext.state === "suspended") {
+    void audioContext.resume();
+  }
+}
+
 export async function primePlaybackAudio(): Promise<void> {
   if (!audioReady) {
-    audioReady = (async () => {
-      const { getAudioContext, initAudio } = await getWebaudioModule();
-      const audioContext = getAudioContext();
-      if (audioContext.state === "suspended") {
-        await audioContext.resume();
-      }
-      await initAudio();
-      if (audioContext.state === "suspended") {
-        await audioContext.resume();
-      }
-    })();
+    audioReady = startAudioReady(await getWebaudioModule());
   }
   await audioReady;
 }
