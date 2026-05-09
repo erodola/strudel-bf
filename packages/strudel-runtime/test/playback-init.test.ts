@@ -23,6 +23,9 @@ describe("playback initialization", () => {
         now: () => 0,
       },
     }));
+    const playablePattern = {
+      queryArc: vi.fn(() => []),
+    };
     const samples = vi.fn(async () => undefined);
 
     vi.doMock("@strudel/webaudio", () => ({
@@ -30,7 +33,7 @@ describe("playback initialization", () => {
     }));
 
     vi.doMock("@strudel/web", () => ({
-      evaluate: vi.fn(),
+      evaluate: vi.fn(async () => playablePattern),
       hush: vi.fn(),
       initStrudel,
       samples,

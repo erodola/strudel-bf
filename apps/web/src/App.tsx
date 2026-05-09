@@ -31,6 +31,7 @@ import defaultBrainfuckSource from "../../../fixtures/landing-page-demo.bf?raw";
 type CompilationState = {
   bfOutput: string;
   renderedCode: string;
+  playableCode?: string;
   tokenSources: MiniTokenSource[];
   upstreamSourceUrl?: string;
 };
@@ -45,18 +46,50 @@ const STRANGER_THINGS_SOURCE_URL =
 const STRANGER_THINGS_SOURCE_PAGE =
   "https://github.com/eefano/strudel-songs-collection/blob/a32abf733a4cab967f30eacb4bcecd596c3e2609/strangerthings.js";
 
-function collectLoaderRanges(
-  outputEvents: ReturnType<typeof executeBrainfuck>["outputEvents"],
-) {
-  return rangeUnion(...outputEvents.map((event) => event.ranges));
-}
-
 async function fetchUpstreamStrudelSource(url: string): Promise<string> {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Could not fetch upstream Strudel source: ${response.status}`);
   }
   return response.text();
+}
+
+function stripTrailingSemicolon(source: string): string {
+  return source.trim().replace(/;\s*$/u, "");
+}
+
+function convertLabelledPatternsToStack(source: string): string {
+  const lines = source.split(/\r?\n/u);
+  const prelude: string[] = [];
+  const patterns: string[] = [];
+  let currentPattern: string[] | null = null;
+
+  for (const line of lines) {
+    const labelMatch = line.match(/^\s*[A-Za-z]\w*\s*:\s*(.*)$/u);
+    if (labelMatch) {
+      if (currentPattern) {
+        patterns.push(stripTrailingSemicolon(currentPattern.join("\n")));
+      }
+      currentPattern = [labelMatch[1] ?? ""];
+      continue;
+    }
+
+    if (currentPattern) {
+      currentPattern.push(line);
+    } else {
+      prelude.push(line);
+    }
+  }
+
+  if (currentPattern) {
+    patterns.push(stripTrailingSemicolon(currentPattern.join("\n")));
+  }
+
+  if (patterns.length === 0) {
+    return source.trim();
+  }
+
+  return `${prelude.join("\n").trim()}\n\nstack(\n${patterns.join(",\n")}\n)`.trim();
 }
 
 async function compileSource(source: string): Promise<CompilationState> {
@@ -72,14 +105,9 @@ async function compileSource(source: string): Promise<CompilationState> {
     return {
       bfOutput: execution.output,
       renderedCode,
+      playableCode: convertLabelledPatternsToStack(renderedCode),
       upstreamSourceUrl: loaderUrl,
-      tokenSources: [
-        {
-          token: "supersaw",
-          miniRange: { start: 0, end: renderedCode.length },
-          bfRanges: collectLoaderRanges(execution.outputEvents),
-        },
-      ],
+      tokenSources: [],
     };
   }
 
@@ -266,7 +294,9 @@ export function App() {
         return;
       }
 
-      const pattern = await playStrudelCode(nextCompilation.renderedCode);
+      const pattern = await playStrudelCode(
+        nextCompilation.playableCode ?? nextCompilation.renderedCode,
+      );
       playbackPatternRef.current = pattern;
       setIsPlaying(true);
 
@@ -383,6 +413,14 @@ export function App() {
                 {compilation?.renderedCode ?? ""}
               </pre>
             </article>
+
+            {compilation?.playableCode &&
+            compilation.playableCode !== compilation.renderedCode ? (
+              <article className="card">
+                <h3>Playback Form</h3>
+                <pre>{compilation.playableCode}</pre>
+              </article>
+            ) : null}
 
             {compilation?.upstreamSourceUrl ? (
               <article className="card">

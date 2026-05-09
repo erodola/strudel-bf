@@ -105,7 +105,11 @@ export async function initPlaybackRuntime(): Promise<any> {
 export async function playStrudelCode(code: string): Promise<any> {
   await initPlaybackRuntime();
   const { evaluate } = await getWebModule();
-  return evaluate(sanitizePlayableCode(code), true);
+  const pattern = await evaluate(sanitizePlayableCode(code), true);
+  if (!pattern?.queryArc) {
+    throw new Error("Strudel source did not produce a playable pattern");
+  }
+  return pattern;
 }
 
 export async function getPlaybackCycleNow(): Promise<number> {
