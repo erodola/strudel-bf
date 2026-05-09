@@ -8,14 +8,32 @@ const activeMark = Decoration.mark({
   class: "cm-bf-active-range",
 });
 
+const activeLine = Decoration.line({
+  attributes: { class: "cm-bf-active-line" },
+});
+
 export function createActiveRangeExtension(ranges: readonly SourceRange[]): Extension {
-  const builder = new RangeSetBuilder<Decoration>();
-  for (const range of ranges) {
-    if (range.end > range.start) {
-      builder.add(range.start, range.end, activeMark);
+  return EditorView.decorations.of((view) => {
+    const builder = new RangeSetBuilder<Decoration>();
+    const activeLineStarts = new Set<number>();
+
+    for (const range of ranges) {
+      const start = Math.max(0, Math.min(range.start, view.state.doc.length));
+      const end = Math.max(start, Math.min(range.end, view.state.doc.length));
+      if (end <= start) {
+        continue;
+      }
+
+      const line = view.state.doc.lineAt(start);
+      if (!activeLineStarts.has(line.from)) {
+        activeLineStarts.add(line.from);
+        builder.add(line.from, line.from, activeLine);
+      }
+      builder.add(start, end, activeMark);
     }
-  }
-  return EditorView.decorations.of(builder.finish());
+
+    return builder.finish();
+  });
 }
 
 export const brainfuckEditorTheme = EditorView.theme({
@@ -47,6 +65,20 @@ export const brainfuckEditorTheme = EditorView.theme({
     outline: "1px solid rgba(255, 42, 66, 0.95)",
     borderRadius: "3px",
     boxShadow: "0 0 12px rgba(255, 42, 66, 0.45)",
+  },
+  ".cm-bf-active-line": {
+    background:
+      "linear-gradient(90deg, rgba(255, 42, 66, 0.2), rgba(255, 42, 66, 0.055) 72%, transparent)",
+    boxShadow: "inset 4px 0 0 rgba(255, 42, 66, 0.78)",
+    animation: "bf-line-flash 180ms ease-out",
+  },
+  "@keyframes bf-line-flash": {
+    "0%": {
+      backgroundColor: "rgba(255, 42, 66, 0.42)",
+    },
+    "100%": {
+      backgroundColor: "transparent",
+    },
   },
   ".cm-gutters": {
     backgroundColor: "#050711",
